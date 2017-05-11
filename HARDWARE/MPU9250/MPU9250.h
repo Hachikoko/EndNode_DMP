@@ -329,6 +329,9 @@
 #define MPU9250_MAG_ASAY                0x11
 #define MPU9250_MAG_ASAZ                0x12
 
+#define MPU9250_MAG_DATA_IS_READY		0x01
+#define MPU9250_MAG_NO_HOFL				0x10
+
 //Magnetometer ID
 #define MPU9250_AKM_ID 0x48
 
@@ -366,6 +369,8 @@ void MPU_Get_9_Axis_Raw(MPU9250_RAW_DATD * mpu_raw_data);
 u8 MPU_Get_Accelerometer(short *ax,short *ay,short *az);
 u8 MPU_Get_Gyroscope(short *gx,short *gy,short *gz);
 u8 MPU_Get_Magnetometer (short *mx,short *my,short *mz);
+u8 MPU_get_ACC_offset(MPU9250_RAW_DATD*);
+u8 MPU_get_GYR_offset(MPU9250_RAW_DATD*);
 
 //MUP9250设置功能参数
 bool setClockSource(const u8 source);

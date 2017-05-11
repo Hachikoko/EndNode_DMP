@@ -3,8 +3,9 @@
 
 #include "MPU9250.h"
 #include "link_queue.h"
-#include "main.h"
 
+#define FLITER_RAW_N 12
+#define FLITER_N (FLITER_RAW_N - 2)
 
 typedef struct splited_raw_data{
 	short ax[FLITER_N];

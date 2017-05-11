@@ -2,8 +2,9 @@
 #include "link_queue.h"
 #include "stdlib.h"
 #include "string.h"
-#include "main.h"
 #include "usart.h"
+
+#define FLITER_RAW_N 3
 
 u8 test_words[30];
 
@@ -34,7 +35,7 @@ u8 pop_node(Link_Queue* link_queue){
 	return 0;
 }
 
-u8 push_back_node(Link_Queue* link_queue,MPU9250_RAW_DATD* ptr_data){
+u8 push_back_node(Link_Queue* link_queue,NODE_DATA* ptr_data){
 	
 	Queue_Node* temp_node = (Queue_Node*)malloc(sizeof(Queue_Node));
 	#ifdef TEST_LINK_QUEUE

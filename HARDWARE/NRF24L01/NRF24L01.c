@@ -2,8 +2,13 @@
 #include "NRF24L01.h"
 #include "SPI.h"
 #include "delay.h"
-#include "main.h"
 #include "Timer.h"
+#include "uart.h"
+#include "stdio.h"
+#include "string.h"
+
+#define ADD_EXTRA_FREQUENCY 120
+#define WORK_FREQUENCY 5
 
 //组网相关变量
 //u8 end_node_add_flag = 0;
@@ -17,36 +22,39 @@ const u8 TX_ADDRESS[TX_ADR_WIDTH]={0x34,0x43,0x10,0x10,0x01}; //发送地址
 const u8 RX_ADDRESS[RX_ADR_WIDTH]={0x34,0x43,0x10,0x10,0x00}; //接收地址	
 u8 words_buf[100];
 
- void EXTI1_IRQHandler(void){
+unsigned int absolute_frame_num = 0;
+
+ void EXTI2_IRQHandler(void){		//中断与MPU重合，先改为2
 	
-	 u8 rev_buf[5] = {0,0,0,0,0};
+	 u8 rev_buf[6] = {0,0,0,0,0,0};
 	 u8 RX_Status;
 	 
-	 if(EXTI_GetITStatus(EXTI_Line1) != RESET){
+	
+	 
+	 if(EXTI_GetITStatus(EXTI_Line2) != RESET){
 		Clr_NRF24L01_CE;
 		RX_Status=NRF24L01_RxPacket(rev_buf);
 		if(RX_Status == 0){
-			Uart1_SendString(rev_buf);
-			Uart1_SendString("\r\n");
+			Uart_string_send((char*)rev_buf);
+			Uart_string_send("\r\n");
 		 }
 		 Set_NRF24L01_CE; 
-		 //分配时隙，开始循环
-		 if(rev_buf[0] == 'S' && rev_buf[1] == 'T' && rev_buf[2] == 'A' && rev_buf[3] == 'R'){
-//#ifdef TEST_VERSION
-//			 Uart1_SendString((u8*)"在时隙分配中...\r\n");
-//#endif
+		 if(rev_buf[0] == 'S' && rev_buf[1] == 'T'){
+			 absolute_frame_num = (*((unsigned int *)(rev_buf+2)));
 			 current_frequency = WORK_FREQUENCY;
 			 TIM_Cmd(TIM7,ENABLE); 
 		 }else if(rev_buf[0] == 'A' && rev_buf[1] == 'N'){
 			node_index_for_base_station = rev_buf[2] - '0' + rev_buf[3] - '0';
+			  
 			Timer7_init();
-			sprintf((char *)words_buf,"AN%02d",node_index_for_base_station);
+			 
+			sprintf((char *)words_buf,"AN%02d%02d",node_index_for_base_station,node_index_for_end_node);
 			Wireless_Send_Data(words_buf);
-//			end_node_add_flag = 1;
+			 Uart_string_send((char*)words_buf);
 			current_frequency = WORK_FREQUENCY;
 			RX_Mode();
 		 }
-		 EXTI_ClearITPendingBit(EXTI_Line1);
+		 EXTI_ClearITPendingBit(EXTI_Line2);
 	 }
  }
 
@@ -69,22 +77,22 @@ void NRF24L01_Init(void){
 	
 	//配置NRF2401的IRQ
 //	RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOC, ENABLE);  
-	GPIO_InitStructure.GPIO_Pin = GPIO_Pin_1;
+	GPIO_InitStructure.GPIO_Pin = GPIO_Pin_2;
   GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IN;            //上拉输入
   GPIO_InitStructure.GPIO_Speed = GPIO_Speed_100MHz;
   GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_UP;
 	GPIO_Init(GPIOC, &GPIO_InitStructure);
 	
 	RCC_APB2PeriphClockCmd(RCC_APB2Periph_SYSCFG, ENABLE);             //外部中断线必须开启SYSCFG 时钟
-  SYSCFG_EXTILineConfig(EXTI_PortSourceGPIOC, EXTI_PinSource1);      //映射IO口与中断线
+  SYSCFG_EXTILineConfig(EXTI_PortSourceGPIOC, EXTI_PinSource2);      //映射IO口与中断线
 	
-	EXTI_InitStructure.EXTI_Line = EXTI_Line1;
+	EXTI_InitStructure.EXTI_Line = EXTI_Line2;
   EXTI_InitStructure.EXTI_Mode = EXTI_Mode_Interrupt;    
 	EXTI_InitStructure.EXTI_Trigger = EXTI_Trigger_Falling; 
   EXTI_InitStructure.EXTI_LineCmd = ENABLE;
   EXTI_Init(&EXTI_InitStructure);
-  NVIC_InitStructure.NVIC_IRQChannel = EXTI1_IRQn;
-  NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 0x01;//优先级最低
+  NVIC_InitStructure.NVIC_IRQChannel = EXTI2_IRQn;
+  NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 0x00;//优先级最低
   NVIC_InitStructure.NVIC_IRQChannelSubPriority = 0x00;
   NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
   NVIC_Init(&NVIC_InitStructure); 
@@ -129,8 +137,7 @@ void NRF24L01_Init(void){
   NRF24L01_Write_Reg(SPI_WRITE_REG+RF_CH,node_index_for_end_node * 5);	     //设置RF通信频率		  			
 	NRF24L01_Write_Reg(SPI_WRITE_REG+SETUP_RETR,0x00);//(被我改成重发禁止了）设置自动重发间隔时间:500us + 86us;最大自动重发次数:10次  
   NRF24L01_Write_Reg(SPI_WRITE_REG+RX_PW_P0,RX_PLOAD_WIDTH);//选择通道0的有效数据宽度 	    
-  NRF24L01_Write_Reg(SPI_WRITE_REG+RF_SETUP,0x3f); //设置TX发射参数,0db增益,2Mbps,低噪声增益开启   
-	 
+  NRF24L01_Write_Reg(SPI_WRITE_REG+RF_SETUP,0x3f); //设置TX发射参数,0db增益,2Mbps,低噪声增益开启  
   Set_NRF24L01_CE; 
 	
 	return;
@@ -139,12 +146,30 @@ void NRF24L01_Init(void){
 
 u8  Wireless_Send_Data(u8 *txbuf){
 	u8 ret = 0;
+	u32 timeout = 0;
 	TX_Mode();
-	delay_us(100);
-  ret = NRF24L01_TxPacket(txbuf);
-	delay_us(200);
+//	while(timeout <16800)
+	while(timeout <5000)
+	{
+	  timeout++;
+	}
+//	udelay(100);
+	ret = NRF24L01_TxPacket(txbuf);
+	timeout = 0;
+//	while(timeout <33600)
+	while(timeout <10000)
+	{
+	  timeout++;
+	}
+//	udelay(200);
 	RX_Mode();
-  delay_us(100);
+//	udelay(100);
+	timeout = 0;
+//	while(timeout <16800)
+	while(timeout <5000)
+	{
+	  timeout++;
+	}
 	return ret;
 }
 
@@ -226,7 +251,8 @@ u8 NRF24L01_TxPacket(u8 *txbuf)
 	Clr_NRF24L01_CE;
 	NRF24L01_Write_Reg(FLUSH_TX,NOP);   //刷新发送缓冲器千万不要去掉，否则数据有时候不更新
   	NRF24L01_Write_Buf(WR_TX_PLOAD,txbuf,TX_PLOAD_WIDTH);//写数据到TX BUF  32个字节
- 	Set_NRF24L01_CE;                                     //启动发送	   
+	
+ 	Set_NRF24L01_CE;                                     //启动发送		
 	while(timeout <2000)
 	{
 	  timeout++;
@@ -248,6 +274,7 @@ u8 NRF24L01_RxPacket(u8 *rxbuf)
 	state=NRF24L01_Read_Reg(STATUS);                //读取状态寄存器的值    	 
         //printf("\n\r Rx state %X", state);
 	NRF24L01_Write_Reg(SPI_WRITE_REG+STATUS,0x7E); //清除TX_DS或MAX_RT中断标志,写1操作为清除
+	
 	if(state&RX_OK)                                 //接收到数据
 	{
 		NRF24L01_Read_Buf(RD_RX_PLOAD,rxbuf,RX_PLOAD_WIDTH);//读取数据
@@ -305,6 +332,8 @@ u8 NRF24L01_Check(void)
 {
 	u8 buf[5]={0XA5,0XA5,0XA5,0XA5,0XA5};
 	u8 buf1[5];
+	char ret_buf[50];
+	int n = 0;
 	u8 i = 0;   	 
 	NRF24L01_Write_Buf(SPI_WRITE_REG+TX_ADDR,buf,5);//写入5个字节的地址.	
 	NRF24L01_Read_Buf(TX_ADDR,buf1,5);//读出写入的地址  	
@@ -317,12 +346,20 @@ u8 NRF24L01_Check(void)
 	}
 	if(i!=5)
 	{
-	
-		 Uart1_SendString(" . 射频模块检测失败......\r\n");
-	return 1;                               //NRF24L01不在位
+		
+		sprintf(ret_buf,"NRF24L01 chek fail!\r\n");
+		n = strlen(ret_buf);
+		for(i = 0;i < n; i++){
+			Uart_send(ret_buf[i]);
+		}
+		return 1;                               //NRF24L01不在位
 	}
 		
-		 Uart1_SendString(" . 射频模块检测通过......\r\n");
+	sprintf(ret_buf,"NRF24L01 chek success!\r\n");
+	n = strlen(ret_buf);
+	for(i = 0;i < n; i++){
+		Uart_send(ret_buf[i]);
+	}
 	return 0;		                                //NRF24L01在位
 }
 

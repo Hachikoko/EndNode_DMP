@@ -5,6 +5,8 @@
 #include "main.h"
 #include "sys.h"
 
+extern char ret_words[100];
+
 u8 MPU9250_Init(void){
 	u8 res_MPU,res_AKM;
 	char ID[20];
@@ -14,11 +16,15 @@ u8 MPU9250_Init(void){
 	MPU_Write_Byte(MPU9250_PWR_MGMT_1,0X00);	//唤醒MPU6050 
 	MPU_Set_Gyro_Fsr(MPU9250_GYRO_FULL_SCALE_500DPS);			//陀螺仪传感器,±500dps
 	MPU_Set_Accel_Fsr(MPU9250_FULL_SCALE_4G);					//加速度传感器,±2g
-//	MPU_Set_Rate(50);						//设置采样率50Hz
 	MPU_Write_Byte(MPU9250_INT_ENABLE,0X00);	//关闭所有中断
 	MPU_Write_Byte(MPU9250_USER_CTRL,0X00);	//I2C主模式关闭
 	MPU_Write_Byte(MPU9250_FIFO_EN,0X00);	//关闭FIFO
 	MPU_Write_Byte(MPU9250_INT_PIN_CFG,0X82);	//INT引脚低电平有效 开启bypass IIC
+	MPU_Write_Byte(MPU9250_PWR_MGMT_1,0X01);	//设置CLKSEL,PLL X轴为参考
+	MPU_Write_Byte(MPU9250_PWR_MGMT_2,0X00);	//加速度与陀螺仪都工作
+	AKM_Write_Byte(MPU9250_MAG_RSV,0x01);
+	AKM_Write_Byte(MPU9250_MAG_CNTL,0x12);		//电子罗盘工作
+	MPU_Set_Rate(800);						//设置采样率为50Hz
 	res_MPU = MPU_Read_Byte(MPU9250_WHO_AM_I);
 	res_AKM = AKM_Read_Byte(MPU9250_MAG_WIA);
 #ifdef TEST_MPU
@@ -27,12 +33,8 @@ u8 MPU9250_Init(void){
 #endif
 	if(res_MPU == MPU9250_ID && res_AKM == MPU9250_AKM_ID)//器件ID正确
 	{
-		MPU_Write_Byte(MPU9250_PWR_MGMT_1,0X01);	//设置CLKSEL,PLL X轴为参考
-		MPU_Write_Byte(MPU9250_PWR_MGMT_2,0X00);	//加速度与陀螺仪都工作
-		MPU_Write_Byte(MPU9250_MAG_CNTL,0x01);		//电子罗盘工作
-		MPU_Set_Rate(800);						//设置采样率为50Hz
+		return 0;
  	}else return 1;
-	return 0;
 }
 
 //void MPU_Get_9_Axis(MPU9250_DATD * mpu_data){
@@ -80,6 +82,15 @@ u8 MPU9250_Init(void){
 //	
 //}
 
+u8 MPU_get_ACC_offset(MPU9250_RAW_DATD* acc_offset){
+	u8 buf[6],ret;
+	ret = MPU_Read_Len(MPU9250_ADDR,MPU9250_ACCEL_XOUT_H,6,buf);
+	
+}
+u8 MPU_get_GYR_offset(MPU9250_RAW_DATD* gry_offset){
+	u8 buf[6],ret;
+}
+
 void MPU_Get_9_Axis_Raw(MPU9250_RAW_DATD * mpu_raw_data){
 	u8 ret = 0;
 	
@@ -95,9 +106,9 @@ void MPU_Get_9_Axis_Raw(MPU9250_RAW_DATD * mpu_raw_data){
 		return;
 	}
 	
-	ret = MPU_Get_Gyroscope(&(mpu_raw_data->mx),&(mpu_raw_data->my),&(mpu_raw_data->mz));
+	ret = MPU_Get_Magnetometer(&(mpu_raw_data->mx),&(mpu_raw_data->my),&(mpu_raw_data->mz));
 	if(ret != 0){
-		Uart1_SendString((u8*)"get gyroscope fail!\r\n");
+		Uart1_SendString((u8*)"get magnetometer fail!\r\n");
 		return;
 	}
 	
@@ -144,15 +155,69 @@ u8 MPU_Get_Gyroscope(short *gx,short *gy,short *gz)
 //    其他,错误代码
 u8 MPU_Get_Magnetometer (short *mx,short *my,short *mz)
 {
-    u8 buf[6],res;  
-	res=MPU_Read_Len(MPU9250_MAG_ADDRESS,MPU9250_MAG_XOUT_L,6,buf);
-	if(res==0)
-	{
+    u8 buf[6],res;
+	u8 x_axis,y_axis,z_axis; 
+	
+	x_axis = AKM_Read_Byte(MPU9250_MAG_ASAX);
+	y_axis = AKM_Read_Byte(MPU9250_MAG_ASAY);
+	z_axis = AKM_Read_Byte(MPU9250_MAG_ASAZ);
+	
+	#ifdef TEST_MPU
+	sprintf(ret_words,"x_axis:%d,y_axis:%d,z_axis:%d\r\n",x_axis,y_axis,z_axis);
+	Uart1_SendString((u8*)ret_words);
+	#endif
+	
+	if(AKM_Read_Byte(MPU9250_MAG_ST1) == MPU9250_MAG_DATA_IS_READY){
+		buf[0]= AKM_Read_Byte(MPU9250_MAG_XOUT_L);
+		if(AKM_Read_Byte(MPU9250_MAG_ST2) != MPU9250_MAG_NO_HOFL){
+			res =  1;
+		}
+		
+		buf[1]= AKM_Read_Byte(MPU9250_MAG_XOUT_H);
+		if(AKM_Read_Byte(MPU9250_MAG_ST2) != MPU9250_MAG_NO_HOFL){
+			res =  1;
+		}
+		
+		buf[2]= AKM_Read_Byte(MPU9250_MAG_YOUT_L);
+		if(AKM_Read_Byte(MPU9250_MAG_ST2) != MPU9250_MAG_NO_HOFL){
+			res =  1;
+		}
+				
+		buf[3]= AKM_Read_Byte(MPU9250_MAG_YOUT_H);
+		if(AKM_Read_Byte(MPU9250_MAG_ST2) != MPU9250_MAG_NO_HOFL){
+			res =  1;
+		}
+		
+		buf[4]= AKM_Read_Byte(MPU9250_MAG_ZOUT_L);
+		if(AKM_Read_Byte(MPU9250_MAG_ST2) != MPU9250_MAG_NO_HOFL){
+			res =  1;
+		}
+		
+		buf[5]= AKM_Read_Byte(MPU9250_MAG_ZOUT_H);
+		if(AKM_Read_Byte(MPU9250_MAG_ST2) != MPU9250_MAG_NO_HOFL){
+			res =  1;
+		}
+		
+		if (1 == res){
+			return res;
+		}
+		
 		*mx=((u16)buf[1]<<8)|buf[0];  
+		*mx *= (((x_axis - 128) >> 8) + 1);
 		*my=((u16)buf[3]<<8)|buf[2];  
+		*my *= (((y_axis - 128) >> 8) + 1);
 		*mz=((u16)buf[5]<<8)|buf[4];
-	} 	
-    return res;;
+		*mz *= (((z_axis - 128) >> 8) + 1);
+	}
+
+
+	
+	#ifdef TEST_MPU
+	sprintf(ret_words,"mx:%d,my:%d,mz:%d\r\n",*mx,*my,*mz);
+	Uart1_SendString((u8*)ret_words);
+	#endif
+
+    return res;
 }
 
 //设置MPU6050的数字低通滤波器
